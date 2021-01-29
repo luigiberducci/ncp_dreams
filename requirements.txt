@@ -1,4 +1,7 @@
 numpy
-tensorflow>=2.3.1
+tensorflow==2.3.1
 keras-ncp
 seaborn
+-e git+https://github.com/axelbr/racecar_gym.git#egg=racecar_gym
+imageio
+imageio-ffmpeg
