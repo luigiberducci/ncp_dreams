@@ -1,147 +1,100 @@
 import pathlib
 import time
+from argparse import ArgumentParser
 
 import numpy as np
-import os
-from tensorflow import keras
-import kerasncp as kncp
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-import wrappers
-from models.ncp_model import NCP
 import tensorflow as tf
+from tensorboard.plugins.hparams import api as hp
+from models.ncp_model import ConvNCP
 import utils
-import tensorflow.keras.layers as kl
+import training
 
-# params
-seq_len = 50      # train ncp model on sequences of fixed length
-epochs = 50
-batch_size = 32
+# training params
+HP_LR = hp.HParam('lr', hp.Discrete([1e-3, 1e-4, 1e-5]))
+# conv head params
+HP_CONV_LAYERS = hp.HParam('n_conv_layers', hp.Discrete([3, 5]))
+HP_BASE_KERNEL_SZ = hp.HParam('base_kernel_size', hp.Discrete([3, 5, 7, 10]))
+# ncp params
+HP_INTER_NEURONS = hp.HParam('inter_neurons', hp.Discrete([12]))
+HP_COMMAND_NEURONS = hp.HParam('command_neurons', hp.Discrete([19]))
+HP_MOTOR_NEURONS = hp.HParam('motor_neurons', hp.Discrete([1, 2]))
+HP_SENSORY_FANOUT = hp.HParam('sensory_fanout', hp.Discrete([6]))
+HP_INTER_FANOUT = hp.HParam('inter_fanout', hp.Discrete([6]))
+HP_RECURRENT_COMMAND_SYN = hp.HParam('recurrent_cmd_synapses', hp.Discrete([6]))
+HP_MOTOR_FANIN = hp.HParam('motor_fanin', hp.Discrete([4]))
+HPARAMS = [HP_LR, HP_CONV_LAYERS, HP_BASE_KERNEL_SZ,
+           HP_INTER_NEURONS, HP_COMMAND_NEURONS, HP_MOTOR_NEURONS,
+           HP_SENSORY_FANOUT, HP_INTER_FANOUT, HP_RECURRENT_COMMAND_SYN, HP_MOTOR_FANIN]
 
-# load data
-datadir = pathlib.Path('data/collect_1611939067.9052866/episodes')
-data_x, data_y = utils.load_episodes(datadir)
-print(f"[Info] Loaded {len(data_y)} episodes")
+def train_once(seq_len, epochs, batch_size, validation_size, hparams, datadir, base_log_dir):
+    # initialization
+    motor_neurons = hparams[HP_MOTOR_NEURONS]
+    model_name = 'steering_conv_ncp' if motor_neurons == 1 else 'motor_steering_conv_ncp'
+    outdir, writer = training.create_log_dir(model_name, base_log_dir)
+    train_dataset, val_dataset = training.prepare_data(datadir, motor_neurons, seq_len, validation_size, batch_size)
+    # define model, optimizer, loss
+    optimizer = tf.keras.optimizers.Adam(learning_rate=hparams[HP_LR])
+    loss_fn = tf.losses.MeanSquaredError()
+    model = training.create_model(model_name, hparams, motor_neurons)
+    # training
+    print(f'[Info] Initial evaluation: loss: {model.evaluate(val_dataset, loss_fn)}')
+    training.train_loop(model, train_dataset, val_dataset, epochs, optimizer, loss_fn, writer)
+    print(f'[Info] Final evaluation: loss: {model.evaluate(val_dataset, loss_fn)}')
+    return model, outdir
 
-# prepare data
-data_x, data_y = utils.create_sequences(data_x, data_y, length=seq_len)
-print(f"[Info] Created {len(data_y)} sequences")
-train_x, train_y, val_x, val_y = utils.split_and_shuffle(data_x, data_y, validation_size=0.15)
-train_x = np.expand_dims(train_x, -1)
-val_x = np.expand_dims(val_x, -1)
-
-# define model
-ncp_arch = kncp.wirings.NCP(
-            inter_neurons=12,       # Number of inter neurons
-            command_neurons=19,     # Number of command neurons
-            motor_neurons=1,        # Number of motor neurons
-            sensory_fanout=6,       # How many outgoing synapses has each sensory neuron
-            inter_fanout=4,         # How many outgoing synapses has each inter neuron
-            recurrent_command_synapses=6,  # Now many recurrent synapses are in the command neuron layer
-            motor_fanin=4,          # How many incomming syanpses has each motor neuron
+def tune_hparams(datadir, logdir):
+    METRIC_MSE = "mse"
+    with tf.summary.create_file_writer(str(logdir)).as_default():
+        hp.hparams_config(
+            hparams=HPARAMS,
+            metrics=[hp.Metric(METRIC_MSE, display_name='MeanSquaredError')],
         )
-ncp_cell = kncp.LTCCell(ncp_arch)
-model = tf.keras.models.Sequential(
-  [
-        keras.layers.InputLayer(input_shape=(None, 1080, 1)),
-        keras.layers.TimeDistributed(
-            keras.layers.Conv1D(18, 10, strides=3, activation="relu")
-        ),
-        keras.layers.TimeDistributed(
-            keras.layers.Conv1D(20, 10, strides=2, activation="relu")
-        ),
-        keras.layers.TimeDistributed(keras.layers.MaxPool1D()),
-        keras.layers.TimeDistributed(
-            keras.layers.Conv1D(22, 10, strides=2, activation="relu")
-        ),
-        keras.layers.TimeDistributed(keras.layers.MaxPool1D()),
-        keras.layers.TimeDistributed(
-            keras.layers.Conv1D(24, 5, activation="relu")
-        ),
-        keras.layers.TimeDistributed(keras.layers.Flatten()),
-        keras.layers.TimeDistributed(keras.layers.Dense(32, activation="relu")),
-        keras.layers.RNN(ncp_cell, return_sequences=True),
-    ])
-optimizer = tf.keras.optimizers.Adam(learning_rate=1e-3)
 
-model.compile(optimizer, loss=tf.keras.losses.MeanSquaredError())
-model.summary()
-
-# plot prediction from untrained model
-fig, axis = plt.subplots(1, 3)
-for i, ax in enumerate(axis):
-  pred = model(np.expand_dims(data_x[i], 0))[0]
-  ax.plot(range(len(data_y[i])), data_y[i], label='true')
-  ax.plot(range(len(data_y[i])), pred, label='untrained')
-print(f'[Info] Preliminary evaluation: loss: {model.evaluate(val_x, val_y)}')
-
-# train model
-hist = model.fit(train_x, train_y, epochs=epochs, verbose=1, batch_size=batch_size, validation_data=(val_x, val_y))
-model.save(f'checkpoints/checkpoint_epochs{epochs}_batch{batch_size}_{time.time()}')
-
-# plot predictions trained model
-for i, ax in enumerate(axis):
-  pred = model(np.expand_dims(data_x[i], 0))[0]
-  ax.plot(range(len(data_y[i])), pred, label='trained')
-  ax.legend()
-print(f'[Info] Final evaluation: loss: {model.evaluate(val_x, val_y)}')
-fig.savefig("samples.png")
-plt.show()
-
-# plot loss
-sns.set()
-plt.figure(figsize=(6, 4))
-plt.plot(hist.history["loss"], label="Training loss")
-plt.legend(loc="upper right")
-plt.xlabel("Training steps")
-plt.show()
-
-# test on track
-import racecar_gym
-import gym
+    session_num = 0
+    for motor_neurons in HP_MOTOR_NEURONS.domain.values:
+        for conv_layers in HP_CONV_LAYERS.domain.values:
+            for base_conv_kernel in HP_BASE_KERNEL_SZ.domain.values:
+                for lr in HP_LR.domain.values:
+                    hparams = {
+                        HP_MOTOR_NEURONS: motor_neurons,
+                        HP_CONV_LAYERS: conv_layers,
+                        HP_BASE_KERNEL_SZ: base_conv_kernel,
+                        HP_LR: lr
+                    }
+                    print(f'--- Starting trial: run-{session_num}')
+                    print({h.name: hparams[h] for h in hparams})
+                    train_once(seq_len=50, epochs=1, batch_size=32, validation_size=0.15, hparams=hparams,
+                               datadir=datadir, base_log_dir=logdir)
+                    session_num += 1
 
 
-action_repeat = 8
-env = gym.make('SingleAgentTreitlstrasse_v2_Gui-v0')
-env = wrappers.ActionRepeat(env, action_repeat)
+def main(args):
+    datadir = pathlib.Path('data/collect_1612207620.541114/episodes')
+    if args.mode == 'default':
+        logdir = pathlib.Path('logs')
+        hparams = {
+            HP_MOTOR_NEURONS: args.motors,
+            HP_CONV_LAYERS: 5,
+            HP_BASE_KERNEL_SZ: 5,
+            HP_LR: 1e-3
+        }
+        model, outdir = train_once(seq_len=50, epochs=args.epochs, batch_size=32, validation_size=0.15, hparams=hparams,
+                                   datadir=datadir, base_log_dir=logdir)
+        training.test_on_track(model, outdir, motor_neurons=args.motors, rendering=True)
+    elif args.mode == 'hparams':
+        logdir = pathlib.Path('logs/hparams')
+        tune_hparams(datadir, logdir)
+    else:
+      raise NotImplementedError(f'mode {args.mode} not implemented')
 
-# set variables
-import time
-init = time.time()
-done = False
-obs = env.reset(mode='grid')
-state = None
-t = 0
-returns = 0.0
-video = []
-# simulate
-while not done:
-  action = {'motor': 0.01, 'steering': 0.00}
-  x = np.reshape(obs['lidar'], (1, 1, -1, 1))   # (batch, t, lida, 1)
-  angle = model(x)[0]
-  action['steering'] = angle
-  obs, rewards, done, states = env.step(action)
-  t += 1
-  returns += rewards
-  if True:
-    # Currently, two rendering modes are available: 'birds_eye' and 'follow'
-    image = env.render(mode='birds_eye')
-    video.append(image)
-# store video
-if True:
-  # last frame
-  image = env.render(mode='birds_eye')
-  video.append(image)
-  import imageio
-  writer = imageio.get_writer(f'videos/ncp_treitlstrasse_{time.time()}.mp4', fps=100//8)
-  for image in video:
-      writer.append_data(image)
-  writer.close()
-# print out result
-print(f"[Info] Cumulative Reward: {returns:.2f}")
-print(f"[Info] Nr Sim Steps: {t * action_repeat}")
-print(f"[Info] Simulated Time: {t * action_repeat / 100} seconds")
-print(f"[Info] Real Time: {time.time() - init:.2f} seconds")
-# close env
-env.close()
+
+if __name__ == "__main__":
+    parser = ArgumentParser()
+    parser.add_argument('--mode', choices=['default', 'hparams'])
+    parser.add_argument('--epochs', type=int, required=False, default=50)
+    parser.add_argument('--motors', type=int, required=False, default=1)
+    args = parser.parse_args()
+    main(args)
