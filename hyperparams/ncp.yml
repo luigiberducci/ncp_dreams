@@ -1,0 +1,14 @@
+batch_size: [32]
+seq_len: [100]
+lr: [1e-3]
+# conv head params
+n_conv_layers: [3]
+base_kernel_size: [5]
+# ncp params
+motor_neurons: [2]
+inter_neurons: [12, 15, 18]
+command_neurons: [6, 9, 12]
+sensory_fanout: [6]
+inter_fanout: [6]
+recurrent_command_synapses: [6, 8, 10]
+motor_fanin: [4]
