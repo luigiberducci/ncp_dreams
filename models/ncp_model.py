@@ -1,4 +1,3 @@
-import tensorflow.keras.layers as kl
 import tools
 import tensorflow.keras.layers as tfkl
 import kerasncp as kncp
@@ -129,7 +128,7 @@ class NCP(tools.Module):
             # Now many recurrent synapses are in the command neuron layer
             motor_fanin=motor_fanin,  # How many incomming syanpses has each motor neuron
         )
-        self._ncp_cell = kl.RNN(kncp.LTCCell(ncp_arch), return_sequences=True)
+        self._ncp_cell = tfkl.RNN(kncp.LTCCell(ncp_arch), return_sequences=True)
 
     def __call__(self, inputs, **kwargs):
         return self._ncp_cell(inputs, **kwargs)

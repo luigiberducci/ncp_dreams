@@ -65,15 +65,20 @@ def simulate_episode(model, motor_neurons, action_repeat=8, rendering=True):
 
     done = False
     obs = env.reset(mode='grid')
+    state = None
     video = []
     returns = 0.0
     while not done:
         action = {}
         x = np.reshape(obs['lidar'], (1, 1, -1, 1)).astype(np.float32)  # (batch, t, lida, 1)
-        if motor_neurons == 1:
-            motor, steering = 0.01, model(x)[0]
+        if state is None:
+            state = x
         else:
-            a = model(x)[0, 0]
+            state = np.concatenate([state, x], axis=1)  # concatenate over time axis
+        if motor_neurons == 1:
+            motor, steering = 0.01, model(state)[0, -1, :]      # take last action of the sequence
+        else:
+            a = model(state)[0, 0, -1, :]                       # take last action of the sequence
             motor, steering = a[0], a[1]
         action['motor'] = motor
         action['steering'] = steering

@@ -26,8 +26,12 @@ def prepare_data(datadir, motor_neurons, seq_len, validation_size, batch_size):
     data_x, data_y = utils.create_sequences(data_x, data_y, length=seq_len)
     print(f"[Info] Created {len(data_y)} sequences")
     train_x, train_y, val_x, val_y = utils.split_and_shuffle(data_x, data_y, validation_size=validation_size)
+    # normalize obervations
+    train_x = np.clip(train_x, 0, 15.0) / 15.0 - 0.5      # normalize observation in +-0.5
+    val_x = np.clip(val_x, 0, 15.0) / 15.0 - 0.5      # normalize observation in +-0.5
     train_x = np.expand_dims(train_x, -1).astype(np.float32)
     val_x = np.expand_dims(val_x, -1).astype(np.float32)
+    # tf dataset
     train_dataset = tf.data.Dataset.from_tensor_slices((train_x, train_y)).batch(batch_size)
     val_dataset = tf.data.Dataset.from_tensor_slices((val_x, val_y)).batch(batch_size)
     return train_dataset, val_dataset
@@ -41,11 +45,11 @@ def create_model(model_name: str, hparams: Dict, motor_neurons: int = 1):
     filters, kernels, strides = [], [], []
     base_kernel_size = get_hparam_value(hparams, 'base_kernel_size')
     n_conv_layers = get_hparam_value(hparams, 'n_conv_layers')
-    if n_conv_layers == 3:
+    if n_conv_layers == 5:
         filters = [18, 20, 22, 24, 25]
         kernels = [2 * base_kernel_size] * 3 + [base_kernel_size] * 2
         strides = [3, 2, 2, 1, 1]
-    elif n_conv_layers == 5:
+    elif n_conv_layers == 3:
         filters = [18, 20, 22]
         kernels = [10, 10, 10]
         strides = [3, 2, 2]
@@ -79,7 +83,7 @@ def train_step(model, x_batch_train, y_batch_train, loss_fn, optimizer):
     return loss_value
 
 
-def test_on_track(model, outdir, motor_neurons=1, action_repeat=8, rendering=True):
+def test_on_track(model, outdir, motor_neurons, action_repeat=8, rendering=True):
     video, returns = utils.simulate_episode(model, motor_neurons=motor_neurons, action_repeat=action_repeat, rendering=rendering)
     videodir = outdir / 'videos'
     videodir.mkdir(parents=True, exist_ok=True)
@@ -114,3 +118,4 @@ def train_loop(model, train_dataset, val_dataset, epochs, writer, hparams=None):
 
         print(f'Epoch {epoch + 1}: train loss: {train_loss.result()}, ' \
               f'validation loss: {val_loss.result()}, time: {time.time() - init}')
+    return model
