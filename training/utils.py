@@ -83,7 +83,7 @@ def get_hparam_value(hparams: Dict, param_name: str):
     for h in hparams:
         if h.name == param_name:
             return hparams[h]
-    return None
+    raise Exception(f'parameter {param_name} not found')
 
 
 def create_model(model_name: str, hparams: Dict, logdir: pathlib.Path):
@@ -92,7 +92,7 @@ def create_model(model_name: str, hparams: Dict, logdir: pathlib.Path):
     n_conv_layers = get_hparam_value(hparams, 'n_conv_layers')
     inter_neurons = get_hparam_value(hparams, 'inter_neurons')
     command_neurons = get_hparam_value(hparams, 'command_neurons')
-    motor_neurons = get_hparam_value(hparams, 'motor_neurons')
+    motor_neurons = 2
     cmd_synapses = get_hparam_value(hparams, 'recurrent_command_synapses')
     if n_conv_layers == 5:
         filters = [18, 20, 22, 24, 25]

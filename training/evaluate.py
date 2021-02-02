@@ -21,7 +21,7 @@ def test_on_track(model, outdir):
     writer.close()
 
 
-def simulate_episode(model):
+def simulate_episode(model, prediction_window=5, terminate_on_collision=True):
     # to do: make it uniform to f1_tenth directory
     done = False
     obs = env.reset(mode='grid')
@@ -35,12 +35,14 @@ def simulate_episode(model):
         if state is None:
             state = x
         else:
-            state = np.concatenate([state, x], axis=1)[:, -10:, :, :]  # concatenate over time axis
+            state = np.concatenate([state, x], axis=1)[:, -prediction_window:, :, :]  # concatenate over time axis
         a = model(state)[0, -1]  # take last action of the sequence
         motor, steering = max(0.005, a[0]), a[1]  # avoid agent stays still
         action['motor'] = motor
         action['steering'] = steering
         obs, rewards, done, states = env.step(action)
+        if terminate_on_collision and states['wall_collision']:
+            done = True
         returns += rewards
         image = env.render(mode='birds_eye')
         video.append(image)
