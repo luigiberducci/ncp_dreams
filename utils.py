@@ -74,11 +74,11 @@ def simulate_episode(model, motor_neurons, action_repeat=8, rendering=True):
         if state is None:
             state = x
         else:
-            state = np.concatenate([state, x], axis=1)  # concatenate over time axis
+            state = np.concatenate([state, x], axis=1)[:, -50:, :, :]  # concatenate over time axis
         if motor_neurons == 1:
-            motor, steering = 0.01, model(state)[0, -1, :]      # take last action of the sequence
+            motor, steering = 0.01, model(state)[0, -1, 0]      # take last action of the sequence
         else:
-            a = model(state)[0, 0, -1, :]                       # take last action of the sequence
+            a = model(state)[0, -1]                       # take last action of the sequence
             motor, steering = a[0], a[1]
         action['motor'] = motor
         action['steering'] = steering
