@@ -2,7 +2,7 @@ import gym
 import wrappers
 import numpy as np
 
-task = 'SingleAgentTreitlstrasse_v2_Gui-v0'
+task = 'SingleAgentTreitlstrasse_v2-v0'
 time_limit = 60*100
 action_repeat = 8
 env = gym.make(task)

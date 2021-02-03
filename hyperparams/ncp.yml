@@ -7,7 +7,7 @@ n_conv_layers: [3]
 base_kernel_size: [5]
 # ncp params
 inter_neurons: [12, 15, 18]
-command_neurons: [6, 9, 12]
+command_neurons: [9, 12]
 sensory_fanout: [6]
 inter_fanout: [6]
 recurrent_command_synapses: [6, 8, 10]
